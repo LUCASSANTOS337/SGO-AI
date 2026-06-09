@@ -222,6 +222,54 @@ export function MetasTracker({
     return true;
   });
 
+  const handleDownloadCollaboratorInvoices = () => {
+    if (!activeGoal) return;
+
+    const isSpecificColab = selectedInvoiceOwnerId !== 'all' && selectedInvoiceOwnerId !== 'coordenacao';
+    const targetId = isSpecificColab 
+      ? selectedInvoiceOwnerId 
+      : (activeUser?.role !== 'Admin' && activeUser?.role !== 'Coordenação' ? activeUser?.id : null);
+
+    let faturasDoColaborador = (activeGoal.faturas || []);
+    let docName = activeGoal.planilhaAnexo?.nome || 'Faturas';
+    
+    if (targetId) {
+      // Filter only for this collaborator
+      faturasDoColaborador = faturasDoColaborador.filter(f => f.responsavelId === targetId);
+      const colabName = users.find(u => u.id === targetId)?.nome || 'Colaborador';
+      const sanitizedName = colabName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_');
+      const sanitizedCompetencia = activeGoal.competencia.replace('/', '_');
+      docName = `faturas_${sanitizedName}_${sanitizedCompetencia}.csv`;
+    } else {
+      const sanitizedCompetencia = activeGoal.competencia.replace('/', '_');
+      docName = `todas_faturas_por_colaborador_${sanitizedCompetencia}.csv`;
+    }
+
+    // Generate CSV with Brazilian formatting (semicolon separator, comma decimal)
+    let csvContent = 'NUM_FATURA;CODCRED;CGC_CPF;NOME_FANTASIA;VL_FATURA;CONSULTA;SADT;RESUMO_INTERN;HONORARIO_INDIVID;STATUS;COMPLEXIDADE;RESPONSAVEL\n';
+    
+    faturasDoColaborador.forEach(f => {
+      const formatNum = (v: number) => String(v || 0).replace('.', ',');
+      const respName = f.responsavelId === 'coordenacao' || f.responsavelId === 'COORDENACAO' 
+        ? 'COORDENACAO' 
+        : (users.find(u => u.id === f.responsavelId)?.nome || f.responsavelId);
+      
+      csvContent += `"${f.numFatura || ''}";"${f.codCred || ''}";"${f.cgcCpf || ''}";"${(f.nomeFantasia || '').replace(/"/g, '""')}";${formatNum(f.vlFatura)};${formatNum(f.consulta)};${formatNum(f.sadt)};${formatNum(f.resumoIntern)};${formatNum(f.honorarioIndivid)};"${f.status || 'Pendente'}";${formatNum(f.complexidade)};"${respName}"\n`;
+    });
+
+    const blob = new Blob([`\ufeff${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', docName.endsWith('.csv') ? docName : `${docName.split('.')[0]}.csv`);
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
       
@@ -303,16 +351,14 @@ export function MetasTracker({
               </p>
             </div>
           </div>
-          {activeGoal.planilhaAnexo.url && (
-            <a
-              href={activeGoal.planilhaAnexo.url}
-              download={activeGoal.planilhaAnexo.nome}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] text-white text-xs font-extrabold rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-100 dark:shadow-none transition-all cursor-pointer shrink-0"
-            >
-              <Download size={13} />
-              Baixar Planilha de Faturas
-            </a>
-          )}
+          <button
+            type="button"
+            onClick={handleDownloadCollaboratorInvoices}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] text-white text-xs font-extrabold rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-100 dark:shadow-none transition-all cursor-pointer shrink-0"
+          >
+            <Download size={13} />
+            Baixar Planilha de Faturas
+          </button>
         </div>
       )}
 
