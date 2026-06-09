@@ -1,0 +1,6 @@
+{
+  "name": "SGO AI – Sistema de Gestão Operacional",
+  "description": "Sistema de gestão por competências, controle de atividades, redistribuição operacional, metas de produção em tempo real e assistente inteligente.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
