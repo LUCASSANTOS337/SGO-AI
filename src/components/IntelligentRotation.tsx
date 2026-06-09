@@ -28,6 +28,22 @@ export function IntelligentRotation({
 
   const canManage = activeUser?.role === 'Admin' || activeUser?.role === 'Coordenação';
 
+  // Filter activities to be unique by case-insensitive name, prioritizing the one with maximum tenure
+  const uniqueActivities: Activity[] = [];
+  const seenNames = new Set<string>();
+
+  const sortedForUniqueness = [...activities].sort((a, b) => {
+    return (b.mesesAtividadeComMesmoResponsavel || 0) - (a.mesesAtividadeComMesmoResponsavel || 0);
+  });
+
+  for (const act of sortedForUniqueness) {
+    const nameKey = act.nome.trim().toLowerCase();
+    if (!seenNames.has(nameKey)) {
+      seenNames.add(nameKey);
+      uniqueActivities.push(act);
+    }
+  }
+
   // Helper: retrieve knowledge rating of user on specific activity name
   const getRating = (uId: string, actName: string): number => {
     const record = knowledge.find(k => k.colaboradorId === uId && k.atividadeNome === actName);
@@ -140,7 +156,7 @@ export function IntelligentRotation({
           <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Rotina Atual & Tempo de Permanência</h4>
           
           <div className="space-y-3">
-            {activities.map(act => {
+            {uniqueActivities.map(act => {
               const months = act.mesesAtividadeComMesmoResponsavel || 1;
               const respUser = users.find(u => u.id === act.responsavelAtualId);
               const limitExceeded = months >= 6;

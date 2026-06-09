@@ -2,6 +2,15 @@ import { User, Activity, Vacation, ProductionGoal, Procedure, KnowledgeRating, A
 
 export const INITIAL_USERS: User[] = [
   {
+    id: 'leandro',
+    nome: 'Leandro Menezes',
+    email: 'leandro.menezes@asfeb.org.br',
+    role: 'Colaborador',
+    metaDiariaPadrao: 12.5,
+    funcao: 'ANALISTA PLENO',
+    senha: '123'
+  },
+  {
     id: 'lucas',
     nome: 'Lucas Alves',
     email: 'lucas.alves@empresa.com',

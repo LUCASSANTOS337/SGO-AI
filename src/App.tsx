@@ -33,6 +33,8 @@ import { HolidaysCalendar } from './components/HolidaysCalendar';
 import { IntelligentRotation } from './components/IntelligentRotation';
 import { InterimPanel } from './components/InterimPanel';
 import { ExecucaoDia } from './components/ExecucaoDia';
+import { LoginScreen } from './components/LoginScreen';
+import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { COMPETENCIAS_LIST, getTodayFormatted, adjustLimitDateForCompetence } from './utils/competencias';
 
 export default function App() {
@@ -50,24 +52,102 @@ export default function App() {
   const [users, setUsers] = useState<UserType[]>(() => {
     try {
       const saved = localStorage.getItem('sgo_users');
-      return saved ? JSON.parse(saved) : INITIAL_USERS;
+      const parsed = saved ? JSON.parse(saved) : INITIAL_USERS;
+      
+      // Merge missing initial users (like Leandro) into the existing structure by email
+      const merged = [...parsed];
+      INITIAL_USERS.forEach(initialUser => {
+        const exists = parsed.some((u: any) => u.email.trim().toLowerCase() === initialUser.email.trim().toLowerCase());
+        if (!exists) {
+          merged.push(initialUser);
+        }
+      });
+
+      // Deduplicate unique by BOTH email and id
+      const uniqueUsers: any[] = [];
+      const seenEmails = new Set<string>();
+      const seenIds = new Set<string>();
+      
+      merged.forEach((u: any) => {
+        const emailKey = u.email ? u.email.trim().toLowerCase() : '';
+        const idKey = u.id ? u.id.trim().toLowerCase() : '';
+        if (emailKey && idKey && !seenEmails.has(emailKey) && !seenIds.has(idKey)) {
+          seenEmails.add(emailKey);
+          seenIds.add(idKey);
+          uniqueUsers.push(u);
+        }
+      });
+
+      // Guarantee everyone has a password, and explicitly enforce Leandro's non-Admin role
+      const finalCleaned = uniqueUsers.map((u: any) => {
+        let updated = { ...u, senha: u.senha || '123' };
+        if (updated.email.trim().toLowerCase() === 'leandro.menezes@asfeb.org.br') {
+          updated.role = 'Colaborador';
+          updated.funcao = 'ANALISTA PLENO';
+        }
+        return updated;
+      });
+
+      // Heal localStorage immediately
+      localStorage.setItem('sgo_users', JSON.stringify(finalCleaned));
+      return finalCleaned;
     } catch {
-      return INITIAL_USERS;
+      const fallback = INITIAL_USERS.map(u => ({ ...u, senha: u.senha || '123' }));
+      try { localStorage.setItem('sgo_users', JSON.stringify(fallback)); } catch {}
+      return fallback;
     }
   });
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      const savedAuth = localStorage.getItem('sgo_is_authenticated');
+      return savedAuth === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   const [activeUser, setActiveUser] = useState<UserType | null>(() => {
     try {
       const savedActive = localStorage.getItem('sgo_active_user');
       const savedUsers = localStorage.getItem('sgo_users');
-      const currentUsers = savedUsers ? JSON.parse(savedUsers) : INITIAL_USERS;
-      if (savedActive) {
+      const rawUsers = savedUsers 
+        ? JSON.parse(savedUsers).map((u: any) => ({ ...u, senha: u.senha || '123' })) 
+        : INITIAL_USERS.map(u => ({ ...u, senha: u.senha || '123' }));
+      
+      const uniqueUsers: any[] = [];
+      const seenEmails = new Set<string>();
+      const seenIds = new Set<string>();
+      
+      rawUsers.forEach((u: any) => {
+        const emailKey = u.email ? u.email.trim().toLowerCase() : '';
+        const idKey = u.id ? u.id.trim().toLowerCase() : '';
+        if (emailKey && idKey && !seenEmails.has(emailKey) && !seenIds.has(idKey)) {
+          seenEmails.add(emailKey);
+          seenIds.add(idKey);
+          uniqueUsers.push(u);
+        }
+      });
+
+      const currentUsers = uniqueUsers.map((u: any) => {
+        if (u.email.trim().toLowerCase() === 'leandro.menezes@asfeb.org.br') {
+          u.role = 'Colaborador';
+          u.funcao = 'ANALISTA PLENO';
+        }
+        return u;
+      });
+      
+      const savedAuth = localStorage.getItem('sgo_is_authenticated');
+      const isAuth = savedAuth === 'true';
+
+      if (savedActive && isAuth) {
         const parsedActive = JSON.parse(savedActive);
         const found = currentUsers.find((u: any) => u.id === parsedActive.id);
         if (found) return found;
       }
-      return currentUsers[0] || null;
+      return null;
     } catch {
-      return INITIAL_USERS[0] || null;
+      return null;
     }
   });
   const [activities, setActivities] = useState<Activity[]>(() => {
@@ -232,6 +312,46 @@ export default function App() {
       infoNova: next
     };
     setAuditLogs(prevLogs => [...prevLogs, newLog]);
+  };
+
+  // -----------------------------------------
+  // Handlers: Authentication & Security
+  // -----------------------------------------
+  const handleLogin = (user: UserType) => {
+    setActiveUser(user);
+    const hasTempPassword = (user.senha || '123') === '123';
+    if (!hasTempPassword) {
+      setIsAuthenticated(true);
+      localStorage.setItem('sgo_is_authenticated', 'true');
+    }
+  };
+
+  const handleChangePassword = (newPw: string) => {
+    if (!activeUser) return;
+    
+    // Update the user's password in users state
+    const updatedUsers = users.map(u => u.id === activeUser.id ? { ...u, senha: newPw } : u);
+    setUsers(updatedUsers);
+    localStorage.setItem('sgo_users', JSON.stringify(updatedUsers));
+
+    // Update activeUser state
+    const updatedActive = { ...activeUser, senha: newPw };
+    setActiveUser(updatedActive);
+    localStorage.setItem('sgo_active_user', JSON.stringify(updatedActive));
+    
+    // Now they are authenticated!
+    setIsAuthenticated(true);
+    localStorage.setItem('sgo_is_authenticated', 'true');
+
+    logEvent('Troca de Senha Efetuada', 'Senha Temporária', 'Nova Senha Registrada');
+  };
+
+  const handleLogout = () => {
+    logEvent('Logout', activeUser?.nome || 'Operador', 'Sessão encerrada pelo usuário');
+    setIsAuthenticated(false);
+    setActiveUser(null);
+    localStorage.removeItem('sgo_is_authenticated');
+    localStorage.removeItem('sgo_active_user');
   };
 
   // -----------------------------------------
@@ -953,12 +1073,13 @@ export default function App() {
   const completedActCount = compActivities.filter(a => a.status === 'Concluída').length;
 
   // Overdue calculations
-  const overdueTasksCount = compActivities.filter(a => {
+  const overdueActivities = compActivities.filter(a => {
     if (a.status === 'Concluída') return false;
     const limitDate = new Date(a.dataLimite);
     const currentDate = new Date(currentSimulatedDate); // Dynamic simulation date
     return limitDate < currentDate;
-  }).length;
+  });
+  const overdueTasksCount = overdueActivities.length;
 
   // Finishing in 5 days
   const finishingInFiveDaysCount = compActivities.filter(a => {
@@ -1006,6 +1127,27 @@ export default function App() {
     auditLogs: auditLogs
   };
 
+  if (!isAuthenticated) {
+    if (activeUser && (activeUser.senha || '123') === '123') {
+      return (
+        <ChangePasswordScreen 
+          activeUser={activeUser}
+          onChangePassword={handleChangePassword}
+          onLogout={handleLogout}
+          themeMode={themeMode === 'escuro' ? 'escuro' : 'claro'}
+        />
+      );
+    }
+    return (
+      <LoginScreen 
+        users={users}
+        onLogin={handleLogin}
+        themeMode={themeMode}
+        toggleTheme={toggleTheme}
+      />
+    );
+  }
+
   return (
     <div className={`min-h-screen flex flex-col font-sans transition-all duration-300 ${themeMode === 'escuro' ? 'bg-zinc-950 text-zinc-100 dark' : 'bg-zinc-50 text-zinc-900'}`}>
       
@@ -1046,24 +1188,39 @@ export default function App() {
               </select>
             </div>
 
-            {/* Simulated Active Teammate switch selector */}
-            <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-850 p-1 rounded-xl border dark:border-zinc-800">
-              <span className="text-[10px] uppercase font-bold text-zinc-400 px-2">Perfil:</span>
-              <select
-                value={activeUser?.id || ''}
-                onChange={(e) => {
-                  const targetUser = users.find(u => u.id === e.target.value);
-                  if (targetUser) setActiveUser(targetUser);
-                }}
-                className="bg-transparent text-xs font-bold focus:outline-none focus:ring-0 text-purple-600 dark:text-purple-400 border-0 shrink-0 cursor-pointer"
-              >
-                {users.map(u => (
-                  <option key={u.id} value={u.id} className="text-purple-600 dark:text-purple-450 font-bold bg-white dark:bg-zinc-900">
-                    {u.nome} ({u.role})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Active User profile switcher for Admin/Coordenação or static badge for Colaboradores */}
+            {activeUser?.role === 'Admin' || activeUser?.role === 'Coordenação' ? (
+              <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-850 p-1 rounded-xl border dark:border-zinc-800">
+                <span className="text-[10px] uppercase font-bold text-zinc-400 px-1.5">Perfil:</span>
+                <select
+                  value={activeUser?.id || ''}
+                  onChange={(e) => {
+                    const targetUser = users.find(u => u.id === e.target.value);
+                    if (targetUser) {
+                      setActiveUser(targetUser);
+                      const isTemp = (targetUser.senha || '123') === '123';
+                      setIsAuthenticated(!isTemp);
+                      localStorage.setItem('sgo_is_authenticated', (!isTemp).toString());
+                      localStorage.setItem('sgo_active_user', JSON.stringify(targetUser));
+                    }
+                  }}
+                  className="bg-transparent text-xs font-black text-purple-600 dark:text-purple-400 border-0 focus:outline-none focus:ring-0 shrink-0 cursor-pointer"
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id} className="text-purple-600 dark:text-purple-450 font-bold bg-white dark:bg-zinc-900">
+                      {u.nome} ({u.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-zinc-150/70 dark:bg-zinc-850 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                <span className="text-[10px] uppercase font-bold text-zinc-400">Perfil:</span>
+                <span className="text-xs font-bold text-purple-650 dark:text-purple-400">
+                  {activeUser?.nome} <span className="text-[10px] text-zinc-400 font-medium bg-zinc-200 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md ml-1">{activeUser?.role}</span>
+                </span>
+              </div>
+            )}
 
             {/* Layout Mode switch button */}
             <button
@@ -1077,9 +1234,18 @@ export default function App() {
             {/* Chat Trigger */}
             <button
               onClick={() => setShowAiAssistant(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 transition font-bold text-white text-xs rounded-xl shadow-md shrink-0"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 transition font-bold text-white text-xs rounded-xl shadow-md shrink-0 cursor-pointer"
             >
               <Sparkles size={13} /> SGO AI
+            </button>
+
+            {/* Top Bar Sign Out Button */}
+            <button
+              onClick={handleLogout}
+              className="p-2 border border-rose-200/50 hover:bg-rose-50 hover:text-rose-600 dark:border-rose-950/40 dark:hover:bg-rose-955/25 text-rose-500 rounded-xl transition shrink-0 cursor-pointer"
+              title="Sair da Conta"
+            >
+              <LogOut size={16} />
             </button>
           </div>
         </div>
@@ -1144,6 +1310,16 @@ export default function App() {
                 <span>{tab.label}</span>
               </button>
             ))}
+
+            <div className="border-t border-zinc-100 dark:border-zinc-850/60 my-1"></div>
+
+            <button
+              onClick={handleLogout}
+              className="w-full text-left py-2 px-3.5 rounded-xl text-xs font-bold flex items-center gap-2.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-955/20 transition-all cursor-pointer"
+            >
+              <LogOut size={14} className="shrink-0" />
+              <span>Sair / Logout</span>
+            </button>
           </nav>
 
           {/* Interino mode box element */}
@@ -1267,12 +1443,99 @@ export default function App() {
 
                   <button 
                     onClick={() => setActiveTab('atividades')}
-                    className="w-full text-center text-xs py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-850 rounded-xl font-bold transition text-zinc-700 dark:text-zinc-300"
+                    className="w-full text-center text-xs py-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-850 rounded-xl font-bold transition text-zinc-700 dark:text-zinc-300 cursor-pointer"
                   >
                     Ver Quadro de Atividades Completo
                   </button>
                 </div>
               </div>
+
+              {/* Overdue Demands Section for Coordination & Admin */}
+              {(activeUser?.role === 'Admin' || activeUser?.role === 'Coordenação') && (
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-2xl p-6 space-y-4">
+                  <div className="flex justify-between items-center pb-2 border-b border-zinc-100 dark:border-zinc-850">
+                    <div>
+                      <h4 className="text-sm font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-2 select-none">
+                        <BadgeAlert size={16} /> Controle de Gestão: Demandas Atrasadas
+                      </h4>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        Existem <strong>{overdueActivities.length}</strong> atividades atrasadas nesta competência que exigem acompanhamento ou reatribuição imediata.
+                      </p>
+                    </div>
+                    <span className="px-2 py-0.5 text-[10px] font-mono bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-450 font-bold rounded-lg uppercase">
+                      Atenção Crítica
+                    </span>
+                  </div>
+
+                  {overdueActivities.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-zinc-400 select-none border border-dashed rounded-xl dark:border-zinc-850">
+                      🎉 Tudo em dia! Nenhuma rotina encontra-se com o prazo de execução vencido.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left text-zinc-500 dark:text-zinc-400">
+                        <thead className="bg-zinc-55 dark:bg-zinc-950 text-zinc-400 uppercase text-[9px] tracking-wider select-none">
+                          <tr>
+                            <th className="p-3">Atividade / Demanda</th>
+                            <th className="p-3">Responsável Atual</th>
+                            <th className="p-3">Prazo Limite</th>
+                            <th className="p-3">Prioridade</th>
+                            <th className="p-3 text-right">Ação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-850">
+                          {overdueActivities.map((act) => {
+                            const resp = users.find(u => u.id === act.responsavelAtualId);
+                            const originalResp = users.find(u => u.id === act.responsavelOriginalId);
+                            
+                            return (
+                              <tr key={act.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 transition">
+                                <td className="p-3 font-semibold text-zinc-800 dark:text-zinc-200">
+                                  {act.nome}
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                                      {resp ? resp.nome : 'Não Atribuído'}
+                                    </span>
+                                    {originalResp && originalResp.id !== resp?.id && (
+                                      <span className="text-[10px] text-zinc-400">
+                                        Original: {originalResp.nome}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-3 font-mono text-rose-600 dark:text-rose-450 font-bold">
+                                  {act.dataLimite.split('-').reverse().join('/')}
+                                </td>
+                                <td className="p-3">
+                                  <span className={`px-2 py-0.5 text-[9px] font-extrabold uppercase rounded-full ${
+                                    act.prioridade === 'Crítica' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/20' :
+                                    act.prioridade === 'Alta' ? 'bg-orange-50 text-orange-700 dark:bg-orange-950/20' :
+                                    'bg-zinc-100 text-zinc-500'
+                                  }`}>
+                                    {act.prioridade}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-right">
+                                  <button
+                                    onClick={() => {
+                                      setActiveTab('atividades');
+                                    }}
+                                    className="px-2.5 py-1 text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    Reatribuir / Tratar
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Risco Operacional Alerts direct inside Dashboard */}
               <div className="p-5 bg-rose-50/50 dark:bg-zinc-900 border border-rose-150/60 dark:border-zinc-800 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

@@ -46,7 +46,9 @@ export function ExecucaoDia({
   
   // Active operator to filter the view for
   const [selectedColabId, setSelectedColabId] = useState<string>(activeUser?.id || '');
-  const targetColab = users.find(u => u.id === selectedColabId) || activeUser;
+  const targetColab = isManager 
+    ? (users.find(u => u.id === selectedColabId) || activeUser) 
+    : activeUser;
   const colabId = targetColab?.id || '';
 
   // Modal / Control Overlay States
