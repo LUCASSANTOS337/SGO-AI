@@ -212,6 +212,22 @@ export function LoginScreen({ users, onLogin, themeMode, toggleTheme }: LoginScr
             )}
           </div>
 
+          {/* Failsafe Local Reset Link */}
+          <div className="text-center pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm("Deseja restaurar o banco de dados local para as definições de fábrica? Isso removerá logins corrompidos e carregará todas as contas novas atualizadas.")) {
+                  localStorage.clear();
+                  window.location.reload();
+                }
+              }}
+              className="text-[10px] text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition cursor-pointer font-medium"
+            >
+              Não encontra seu usuário? Resetar banco de dados local (Fábrica)
+            </button>
+          </div>
+
 
 
         </div>

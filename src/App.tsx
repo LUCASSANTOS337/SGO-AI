@@ -49,37 +49,62 @@ export default function App() {
       return 'Junho/2026';
     }
   });
-  const [users, setUsers] = useState<UserType[]>(() => {
+  const getHealedUsers = (): UserType[] => {
     try {
       const saved = localStorage.getItem('sgo_users');
-      const parsed = saved ? JSON.parse(saved) : INITIAL_USERS;
+      let parsed: any[] = [];
+      if (saved) {
+        try {
+          const raw = JSON.parse(saved);
+          if (Array.isArray(raw)) {
+            parsed = raw;
+          } else {
+            parsed = INITIAL_USERS;
+          }
+        } catch {
+          parsed = INITIAL_USERS;
+        }
+      } else {
+        parsed = INITIAL_USERS;
+      }
       
-      // Merge missing initial users (like Leandro) into the existing structure by email
-      const merged = [...parsed];
-      INITIAL_USERS.forEach(initialUser => {
-        const exists = parsed.some((u: any) => u.email.trim().toLowerCase() === initialUser.email.trim().toLowerCase());
-        if (!exists) {
-          merged.push(initialUser);
+      // Start with a pristine list from INITIAL_USERS so core users can never be lost or blocked
+      const merged = INITIAL_USERS.map(u => ({ ...u, senha: u.senha || '123' }));
+      
+      // Append any custom added users, but do not replace or corrupt core INITIAL_USERS
+      parsed.forEach((storedUser: any) => {
+        if (!storedUser) return;
+        const storedEmail = storedUser.email ? storedUser.email.trim().toLowerCase() : '';
+        const storedId = storedUser.id ? storedUser.id.trim().toLowerCase() : '';
+        
+        if (!storedEmail || !storedId) return;
+
+        const isCoreUser = INITIAL_USERS.some(cu => 
+          cu.id.trim().toLowerCase() === storedId || 
+          cu.email.trim().toLowerCase() === storedEmail
+        );
+
+        if (!isCoreUser) {
+          merged.push({
+            ...storedUser,
+            id: storedId,
+            email: storedEmail,
+            senha: storedUser.senha || '123'
+          });
+        } else {
+          // If the core user had updated their password, preserve it
+          const coreIdx = merged.findIndex(cu => 
+            cu.id.trim().toLowerCase() === storedId || 
+            cu.email.trim().toLowerCase() === storedEmail
+          );
+          if (coreIdx !== -1 && storedUser.senha && storedUser.senha !== '123') {
+            merged[coreIdx].senha = storedUser.senha;
+          }
         }
       });
 
-      // Deduplicate unique by BOTH email and id
-      const uniqueUsers: any[] = [];
-      const seenEmails = new Set<string>();
-      const seenIds = new Set<string>();
-      
-      merged.forEach((u: any) => {
-        const emailKey = u.email ? u.email.trim().toLowerCase() : '';
-        const idKey = u.id ? u.id.trim().toLowerCase() : '';
-        if (emailKey && idKey && !seenEmails.has(emailKey) && !seenIds.has(idKey)) {
-          seenEmails.add(emailKey);
-          seenIds.add(idKey);
-          uniqueUsers.push(u);
-        }
-      });
-
-      // Guarantee everyone has a password, and explicitly enforce Leandro's non-Admin role
-      const finalCleaned = uniqueUsers.map((u: any) => {
+      // Enforce specific security constraints for Leandro
+      const finalCleaned = merged.map((u: any) => {
         let updated = { ...u, senha: u.senha || '123' };
         if (updated.email.trim().toLowerCase() === 'leandro.menezes@asfeb.org.br') {
           updated.role = 'Colaborador';
@@ -88,7 +113,7 @@ export default function App() {
         return updated;
       });
 
-      // Heal localStorage immediately
+      // Persist healed clean users
       localStorage.setItem('sgo_users', JSON.stringify(finalCleaned));
       return finalCleaned;
     } catch {
@@ -96,6 +121,10 @@ export default function App() {
       try { localStorage.setItem('sgo_users', JSON.stringify(fallback)); } catch {}
       return fallback;
     }
+  };
+
+  const [users, setUsers] = useState<UserType[]>(() => {
+    return getHealedUsers();
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -110,32 +139,7 @@ export default function App() {
   const [activeUser, setActiveUser] = useState<UserType | null>(() => {
     try {
       const savedActive = localStorage.getItem('sgo_active_user');
-      const savedUsers = localStorage.getItem('sgo_users');
-      const rawUsers = savedUsers 
-        ? JSON.parse(savedUsers).map((u: any) => ({ ...u, senha: u.senha || '123' })) 
-        : INITIAL_USERS.map(u => ({ ...u, senha: u.senha || '123' }));
-      
-      const uniqueUsers: any[] = [];
-      const seenEmails = new Set<string>();
-      const seenIds = new Set<string>();
-      
-      rawUsers.forEach((u: any) => {
-        const emailKey = u.email ? u.email.trim().toLowerCase() : '';
-        const idKey = u.id ? u.id.trim().toLowerCase() : '';
-        if (emailKey && idKey && !seenEmails.has(emailKey) && !seenIds.has(idKey)) {
-          seenEmails.add(emailKey);
-          seenIds.add(idKey);
-          uniqueUsers.push(u);
-        }
-      });
-
-      const currentUsers = uniqueUsers.map((u: any) => {
-        if (u.email.trim().toLowerCase() === 'leandro.menezes@asfeb.org.br') {
-          u.role = 'Colaborador';
-          u.funcao = 'ANALISTA PLENO';
-        }
-        return u;
-      });
+      const currentUsers = getHealedUsers();
       
       const savedAuth = localStorage.getItem('sgo_is_authenticated');
       const isAuth = savedAuth === 'true';
