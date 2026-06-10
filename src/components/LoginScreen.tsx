@@ -15,6 +15,8 @@ export function LoginScreen({ users, onLogin, themeMode, toggleTheme }: LoginScr
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [showGuide, setShowGuide] = useState(false);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -41,9 +43,10 @@ export function LoginScreen({ users, onLogin, themeMode, toggleTheme }: LoginScr
     }
   };
 
-  const handleQuickLogin = (user: UserType) => {
-    setEmail(user.email);
-    setPassword(user.senha || '123');
+  const autofillUser = (userEmail: string) => {
+    setEmail(userEmail);
+    const found = users.find(u => u.email.trim().toLowerCase() === userEmail.trim().toLowerCase());
+    setPassword(found?.senha || '123');
     setErrorMsg(null);
   };
 
@@ -79,7 +82,7 @@ export function LoginScreen({ users, onLogin, themeMode, toggleTheme }: LoginScr
             </div>
             <h2 className="text-xl font-black tracking-tight text-zinc-900 dark:text-white">Acesse o SGO AI</h2>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-xs mx-auto leading-relaxed">
-              Digite suas credenciais corporativas ou utilize o menu de simulação rápida abaixo.
+              Insira o seu e-mail corporativo cadastrado e senha para entrar no sistema.
             </p>
           </div>
 
@@ -146,6 +149,68 @@ export function LoginScreen({ users, onLogin, themeMode, toggleTheme }: LoginScr
               Entrar no Sistema
             </button>
           </form>
+
+          {/* Collapsible Demo Credentials Helper specifically optimized for Vercel testers */}
+          <div className="border-t border-zinc-100 dark:border-zinc-850 pt-4 space-y-2 select-none">
+            <button
+              type="button"
+              onClick={() => setShowGuide(!showGuide)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-zinc-50 dark:bg-zinc-950/40 hover:bg-zinc-100 dark:hover:bg-zinc-850 border border-zinc-200/50 dark:border-zinc-850 rounded-xl transition text-[11px] font-bold text-zinc-500 dark:text-zinc-400 cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <Sparkles size={12} className="text-indigo-500 animate-pulse" />
+                Guia de Acessos para Avaliação (Vercel)
+              </span>
+              <span className="text-[9px] px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-300 font-mono">
+                {showGuide ? 'Fechar' : 'Ver'}
+              </span>
+            </button>
+
+            {showGuide && (
+              <div className="p-3 bg-zinc-50/50 dark:bg-zinc-950/20 border border-dashed border-zinc-200 dark:border-zinc-850 rounded-xl space-y-2 animate-fade-in">
+                <p className="text-[10px] text-zinc-450 dark:text-zinc-400 font-sans leading-relaxed text-center pb-1">
+                  Clique em um perfil para preencher os dados de acesso automaticamente:
+                </p>
+                <div className="grid grid-cols-1 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => autofillUser('lucas.alves@empresa.com')}
+                    className="w-full p-2 text-left bg-white dark:bg-zinc-900 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 border border-zinc-200/70 dark:border-zinc-800 rounded-lg transition-all text-[10px] cursor-pointer flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="font-extrabold text-zinc-800 dark:text-zinc-200">Lucas Alves (Admin)</div>
+                      <div className="text-[9px] text-zinc-450 dark:text-zinc-500 font-mono">lucas.alves@empresa.com</div>
+                    </div>
+                    <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-black tracking-wider uppercase">ADMIN</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => autofillUser('ila.ramos@empresa.com')}
+                    className="w-full p-2 text-left bg-white dark:bg-zinc-900 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 border border-zinc-200/70 dark:border-zinc-800 rounded-lg transition-all text-[10px] cursor-pointer flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="font-extrabold text-zinc-800 dark:text-zinc-200">Ila Ramos (Coordenação)</div>
+                      <div className="text-[9px] text-zinc-450 dark:text-zinc-500 font-mono">ila.ramos@empresa.com</div>
+                    </div>
+                    <span className="text-[9px] text-teal-600 dark:text-teal-400 font-black tracking-wider uppercase">COORD</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => autofillUser('leandro.menezes@asfeb.org.br')}
+                    className="w-full p-2 text-left bg-white dark:bg-zinc-900 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 border border-zinc-200/70 dark:border-zinc-800 rounded-lg transition-all text-[10px] cursor-pointer flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="font-extrabold text-zinc-800 dark:text-zinc-200">Leandro Menezes (Colaborador)</div>
+                      <div className="text-[9px] text-zinc-450 dark:text-zinc-500 font-mono">leandro.menezes@asfeb.org.br</div>
+                    </div>
+                    <span className="text-[9px] text-purple-600 dark:text-purple-400 font-black tracking-wider uppercase">COLAB</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
 
 
