@@ -41,6 +41,18 @@ import { COMPETENCIAS_LIST, getTodayFormatted, adjustLimitDateForCompetence } fr
 export default function App() {
   const [isLoadingDb, setIsLoadingDb] = useState<boolean>(true);
   const isSyncingFromDb = React.useRef<boolean>(false);
+  const clientIdRef = React.useRef<string>(Math.random().toString(36).substring(2, 11));
+  const liveChannelRef = React.useRef<any>(null);
+
+  const broadcastChange = (key: string, value: any) => {
+    if (isSupabaseConfigured && liveChannelRef.current) {
+      liveChannelRef.current.send({
+        type: 'broadcast',
+        event: 'state_changed',
+        payload: { key, value, senderId: clientIdRef.current }
+      }).catch((err: any) => console.warn("Erro no broadcast:", err));
+    }
+  };
 
   // -----------------------------------------
   // Core Operational States
@@ -265,6 +277,7 @@ export default function App() {
     localStorage.setItem('sgo_competencia', competencia);
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_competencia', competencia);
+      broadcastChange('sgo_competencia', competencia);
     }
   }, [competencia]);
 
@@ -272,6 +285,7 @@ export default function App() {
     localStorage.setItem('sgo_users', JSON.stringify(users));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_users', users);
+      broadcastChange('sgo_users', users);
     }
   }, [users]);
 
@@ -287,6 +301,7 @@ export default function App() {
     localStorage.setItem('sgo_activities', JSON.stringify(activities));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_activities', activities);
+      broadcastChange('sgo_activities', activities);
     }
   }, [activities]);
 
@@ -294,6 +309,7 @@ export default function App() {
     localStorage.setItem('sgo_vacations', JSON.stringify(vacations));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_vacations', vacations);
+      broadcastChange('sgo_vacations', vacations);
     }
   }, [vacations]);
 
@@ -301,6 +317,7 @@ export default function App() {
     localStorage.setItem('sgo_goals', JSON.stringify(productionGoals));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_goals', productionGoals);
+      broadcastChange('sgo_goals', productionGoals);
     }
   }, [productionGoals]);
 
@@ -308,6 +325,7 @@ export default function App() {
     localStorage.setItem('sgo_procedures', JSON.stringify(procedures));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_procedures', procedures);
+      broadcastChange('sgo_procedures', procedures);
     }
   }, [procedures]);
 
@@ -315,6 +333,7 @@ export default function App() {
     localStorage.setItem('sgo_knowledge', JSON.stringify(knowledge));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_knowledge', knowledge);
+      broadcastChange('sgo_knowledge', knowledge);
     }
   }, [knowledge]);
 
@@ -322,6 +341,7 @@ export default function App() {
     localStorage.setItem('sgo_audit_logs', JSON.stringify(auditLogs));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_audit_logs', auditLogs);
+      broadcastChange('sgo_audit_logs', auditLogs);
     }
   }, [auditLogs]);
 
@@ -329,6 +349,7 @@ export default function App() {
     localStorage.setItem('sgo_simulated_date', currentSimulatedDate);
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_simulated_date', currentSimulatedDate);
+      broadcastChange('sgo_simulated_date', currentSimulatedDate);
     }
   }, [currentSimulatedDate]);
 
@@ -336,6 +357,7 @@ export default function App() {
     localStorage.setItem('sgo_holidays', JSON.stringify(holidays));
     if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
       saveKeyToSupabase('sgo_holidays', holidays);
+      broadcastChange('sgo_holidays', holidays);
     }
   }, [holidays]);
 
@@ -404,14 +426,75 @@ export default function App() {
 
     loadStateAndSync();
 
-    // Background short-polling to keep other computers / browsers fully aligned
+    // Background short-polling to keep other computers / browsers fully aligned as fallback
     const pollInterval = setInterval(() => {
       loadStateAndSync();
     }, 8000);
 
+    // Realtime Supabase Broadcast Channel for 100% instant sync
+    let channel: any = null;
+    if (isSupabaseConfigured && supabase) {
+      channel = supabase.channel('sgo_live_room');
+      liveChannelRef.current = channel;
+
+      channel
+        .on('broadcast', { event: 'state_changed' }, ({ payload }: any) => {
+          if (!payload || payload.senderId === clientIdRef.current) return;
+          
+          isSyncingFromDb.current = true;
+          const { key, value } = payload;
+          console.log(`[REALTIME-WS] Instant sync update received for key "${key}"!`);
+          
+          switch(key) {
+            case 'sgo_competencia':
+              setCompetencia(value);
+              break;
+            case 'sgo_users':
+              setUsers(value);
+              break;
+            case 'sgo_activities':
+              setActivities(value);
+              break;
+            case 'sgo_vacations':
+              setVacations(value);
+              break;
+            case 'sgo_goals':
+              setProductionGoals(value);
+              break;
+            case 'sgo_procedures':
+              setProcedures(value);
+              break;
+            case 'sgo_knowledge':
+              setKnowledge(value);
+              break;
+            case 'sgo_audit_logs':
+              setAuditLogs(value);
+              break;
+            case 'sgo_simulated_date':
+              setCurrentSimulatedDate(value);
+              break;
+            case 'sgo_holidays':
+              setHolidays(value);
+              break;
+          }
+
+          setTimeout(() => {
+            isSyncingFromDb.current = false;
+          }, 350);
+        })
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('[REALTIME-WS] Connected and active for instant updates!');
+          }
+        });
+    }
+
     return () => {
       active = false;
       clearInterval(pollInterval);
+      if (channel && supabase) {
+        supabase.removeChannel(channel).catch((err: any) => console.warn(err));
+      }
     };
   }, []);
 
