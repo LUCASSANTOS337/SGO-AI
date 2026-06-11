@@ -9,6 +9,7 @@ import {
   INITIAL_USERS, INITIAL_ACTIVITIES, INITIAL_VACATIONS, 
   INITIAL_GOALS, INITIAL_PROCEDURES, INITIAL_KNOWLEDGE, INITIAL_AUDIT_LOGS 
 } from './mockData';
+import { isSupabaseConfigured, supabase, loadAllStateFromSupabase, saveKeyToSupabase } from './lib/supabase';
 import { 
   User as UserType, Activity, Vacation, ProductionGoal, 
   Procedure, KnowledgeRating, AuditLog, Priority, ActivityStatus, Comment, Holiday
@@ -38,6 +39,9 @@ import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { COMPETENCIAS_LIST, getTodayFormatted, adjustLimitDateForCompetence } from './utils/competencias';
 
 export default function App() {
+  const [isLoadingDb, setIsLoadingDb] = useState<boolean>(true);
+  const isSyncingFromDb = React.useRef<boolean>(false);
+
   // -----------------------------------------
   // Core Operational States
   // -----------------------------------------
@@ -255,14 +259,20 @@ export default function App() {
   };
 
   // -----------------------------------------
-  // Automatic Persistence Effects
+  // Automatic Persistence Effects (Local + Supabase Sync)
   // -----------------------------------------
   useEffect(() => {
     localStorage.setItem('sgo_competencia', competencia);
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_competencia', competencia);
+    }
   }, [competencia]);
 
   useEffect(() => {
     localStorage.setItem('sgo_users', JSON.stringify(users));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_users', users);
+    }
   }, [users]);
 
   useEffect(() => {
@@ -275,35 +285,135 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('sgo_activities', JSON.stringify(activities));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_activities', activities);
+    }
   }, [activities]);
 
   useEffect(() => {
     localStorage.setItem('sgo_vacations', JSON.stringify(vacations));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_vacations', vacations);
+    }
   }, [vacations]);
 
   useEffect(() => {
     localStorage.setItem('sgo_goals', JSON.stringify(productionGoals));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_goals', productionGoals);
+    }
   }, [productionGoals]);
 
   useEffect(() => {
     localStorage.setItem('sgo_procedures', JSON.stringify(procedures));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_procedures', procedures);
+    }
   }, [procedures]);
 
   useEffect(() => {
     localStorage.setItem('sgo_knowledge', JSON.stringify(knowledge));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_knowledge', knowledge);
+    }
   }, [knowledge]);
 
   useEffect(() => {
     localStorage.setItem('sgo_audit_logs', JSON.stringify(auditLogs));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_audit_logs', auditLogs);
+    }
   }, [auditLogs]);
 
   useEffect(() => {
     localStorage.setItem('sgo_simulated_date', currentSimulatedDate);
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_simulated_date', currentSimulatedDate);
+    }
   }, [currentSimulatedDate]);
 
   useEffect(() => {
     localStorage.setItem('sgo_holidays', JSON.stringify(holidays));
+    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
+      saveKeyToSupabase('sgo_holidays', holidays);
+    }
   }, [holidays]);
+
+  // -----------------------------------------
+  // Supabase Database Live Synchronizer (Polling & Initial Seed)
+  // -----------------------------------------
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setIsLoadingDb(false);
+      return;
+    }
+
+    let active = true;
+
+    async function loadStateAndSync() {
+      try {
+        console.log("Sincronizando banco de dados compartilhado com o Supabase...");
+        const dbState = await loadAllStateFromSupabase();
+        
+        if (!active) return;
+
+        // If shared database has records, load them cleanly
+        if (dbState && (dbState.sgo_users || dbState.sgo_activities)) {
+          isSyncingFromDb.current = true;
+          
+          if (dbState.sgo_users) setUsers(dbState.sgo_users);
+          if (dbState.sgo_activities) setActivities(dbState.sgo_activities);
+          if (dbState.sgo_vacations) setVacations(dbState.sgo_vacations);
+          if (dbState.sgo_goals) setProductionGoals(dbState.sgo_goals);
+          if (dbState.sgo_procedures) setProcedures(dbState.sgo_procedures);
+          if (dbState.sgo_knowledge) setKnowledge(dbState.sgo_knowledge);
+          if (dbState.sgo_audit_logs) setAuditLogs(dbState.sgo_audit_logs);
+          if (dbState.sgo_holidays) setHolidays(dbState.sgo_holidays);
+          if (dbState.sgo_competencia) setCompetencia(dbState.sgo_competencia);
+          if (dbState.sgo_simulated_date) setCurrentSimulatedDate(dbState.sgo_simulated_date);
+
+          setTimeout(() => {
+            isSyncingFromDb.current = false;
+          }, 300);
+        } else {
+          // Empty database: Seed it instantly with initial state to start clean
+          console.log("Injetando dados iniciais operacionais no Supabase...");
+          isSyncingFromDb.current = true;
+          await Promise.all([
+            saveKeyToSupabase('sgo_users', getHealedUsers()),
+            saveKeyToSupabase('sgo_activities', INITIAL_ACTIVITIES),
+            saveKeyToSupabase('sgo_vacations', INITIAL_VACATIONS),
+            saveKeyToSupabase('sgo_goals', INITIAL_GOALS),
+            saveKeyToSupabase('sgo_procedures', INITIAL_PROCEDURES),
+            saveKeyToSupabase('sgo_knowledge', INITIAL_KNOWLEDGE),
+            saveKeyToSupabase('sgo_audit_logs', INITIAL_AUDIT_LOGS),
+            saveKeyToSupabase('sgo_holidays', holidays),
+            saveKeyToSupabase('sgo_competencia', competencia),
+            saveKeyToSupabase('sgo_simulated_date', currentSimulatedDate)
+          ]);
+          isSyncingFromDb.current = false;
+        }
+      } catch (err) {
+        console.warn("Falha ao sincronizar estados com Supabase:", err);
+      } finally {
+        if (active) {
+          setIsLoadingDb(false);
+        }
+      }
+    }
+
+    loadStateAndSync();
+
+    // Background short-polling to keep other computers / browsers fully aligned
+    const pollInterval = setInterval(() => {
+      loadStateAndSync();
+    }, 8000);
+
+    return () => {
+      active = false;
+      clearInterval(pollInterval);
+    };
+  }, []);
 
   // Helper to add audit logs
   const logEvent = (actionName: string, prev?: string, next?: string) => {
@@ -1176,6 +1286,23 @@ export default function App() {
           {/* Interactive Profile switcher and controls */}
           <div className="flex flex-wrap items-center justify-end gap-3">
             
+            {/* Supabase Status Indicator */}
+            {isSupabaseConfigured ? (
+              <div 
+                className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/20 px-2.5 py-1.5 rounded-xl border border-emerald-200/40 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 font-bold text-[10px] uppercase select-none shrink-0"
+                title="Conectado e sincronizado com o banco de dados Supabase na Vercel"
+              >
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0 animate-pulse" /> Supabase Ativo
+              </div>
+            ) : (
+              <div 
+                className="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1.5 rounded-xl border border-amber-200/40 dark:border-amber-900/40 text-amber-600 dark:text-amber-400 font-bold text-[10px] uppercase select-none shrink-0"
+                title="Armazenando dados no navegador. Configure VITE_SUPABASE_URL nas variáveis de ambiente."
+              >
+                <div className="w-1.5 h-1.5 bg-amber-550 rounded-full shrink-0 animate-bounce" /> Local Offline
+              </div>
+            )}
+
             {/* Competencia Dynamic Switcher */}
             <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-850 p-1 rounded-xl border dark:border-zinc-800">
               <span className="text-[10px] uppercase font-bold text-zinc-400 px-1.5">Ciclo:</span>
