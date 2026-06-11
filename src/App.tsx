@@ -1,4 +1,3 @@
-import { salvarDadosEquipe } from './database';
 import React, { useState, useEffect } from 'react';
 import { 
   Bot, LayoutDashboard, Database, CalendarRange, Target, BookOpen, Layers, 
@@ -116,7 +115,6 @@ export default function App() {
 
       // Persist healed clean users
       localStorage.setItem('sgo_users', JSON.stringify(finalCleaned));
-      salvarDadosEquipe("Equipe SGO", JSON.stringify(finalCleaned));
       return finalCleaned;
     } catch {
       const fallback = INITIAL_USERS.map(u => ({ ...u, senha: u.senha || '123' }));
