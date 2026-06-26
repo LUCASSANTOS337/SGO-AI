@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Bot, LayoutDashboard, Database, CalendarRange, Target, BookOpen, Layers, 
   FileText, ShieldCheck, Sun, Moon, Sparkles, User, RefreshCw, ChevronRight, 
-  BadgeAlert, Clock, LogOut, ShieldAlert, ArrowRight, UserCheck
+  BadgeAlert, Clock, LogOut, ShieldAlert, ArrowRight, UserCheck, Copy, Check, X
 } from 'lucide-react';
 
 import { 
@@ -13,6 +13,9 @@ import {
   User as UserType, Activity, Vacation, ProductionGoal, 
   Procedure, KnowledgeRating, AuditLog, Priority, ActivityStatus, Comment, Holiday
 } from './types';
+
+// Supabase Integration Service
+import { supabaseService, isSupabaseConfigured } from './lib/supabaseService';
 
 // Importing subcomponents
 import { MetricCard, TeamProductivityGauge, MiniBarChart } from './components/Charts';
@@ -38,6 +41,110 @@ import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { COMPETENCIAS_LIST, getTodayFormatted, adjustLimitDateForCompetence } from './utils/competencias';
 
 export default function App() {
+  // -----------------------------------------
+  // Supabase Sync States & Helpers
+  // -----------------------------------------
+  const isSyncingFromSupabase = React.useRef(false);
+  const [supabaseLoading, setSupabaseLoading] = useState<boolean>(false);
+  const [supabaseStatus, setSupabaseStatus] = useState<'idle' | 'success' | 'error' | 'offline'>(
+    isSupabaseConfigured ? 'idle' : 'offline'
+  );
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState<boolean>(false);
+  const [sqlCopied, setSqlCopied] = useState<boolean>(false);
+
+  const loadAllSupabaseData = async () => {
+    if (!isSupabaseConfigured) {
+      setSupabaseStatus('offline');
+      return;
+    }
+    setSupabaseLoading(true);
+    setSupabaseStatus('idle');
+    try {
+      // Set to true immediately during initial load to prevent immediate auto-saves from firing
+      isSyncingFromSupabase.current = true;
+
+      const [
+        dbUsers,
+        dbActivities,
+        dbVacations,
+        dbGoals,
+        dbProcedures,
+        dbKnowledge,
+        dbLogs,
+        dbHolidays,
+        dbCompetencia,
+        dbSimDate
+      ] = await Promise.all([
+        supabaseService.getUsers(),
+        supabaseService.getActivities(),
+        supabaseService.getVacations(),
+        supabaseService.getProductionGoals(),
+        supabaseService.getProcedures(),
+        supabaseService.getKnowledge(),
+        supabaseService.getAuditLogs(),
+        supabaseService.getHolidays(),
+        supabaseService.getSetting('competencia', ''),
+        supabaseService.getSetting('simulated_date', '')
+      ]);
+
+      const isConnectionWorking = (
+        dbUsers !== null &&
+        dbActivities !== null &&
+        dbVacations !== null &&
+        dbGoals !== null &&
+        dbProcedures !== null &&
+        dbKnowledge !== null &&
+        dbHolidays !== null
+      );
+
+      if (isConnectionWorking) {
+        setSupabaseStatus('success');
+        
+        // If the remote database has no users and no activities, seed it with the local state!
+        if (dbUsers.length === 0 && dbActivities.length === 0) {
+          console.log('Remote Supabase is empty. Seeding local state to cloud...');
+          if (competencia) supabaseService.saveSetting('competencia', competencia);
+          if (currentSimulatedDate) supabaseService.saveSetting('simulated_date', currentSimulatedDate);
+          users.forEach(u => supabaseService.saveUser(u));
+          activities.forEach(a => supabaseService.saveActivity(a));
+          vacations.forEach(v => supabaseService.saveVacation(v));
+          productionGoals.forEach(g => supabaseService.saveProductionGoal(g));
+          procedures.forEach(p => supabaseService.saveProcedure(p));
+          knowledge.forEach(k => supabaseService.saveKnowledge(k));
+          holidays.forEach(h => supabaseService.saveHoliday(h));
+        } else {
+          // Otherwise, populate application state with remote data
+          if (dbUsers.length > 0) setUsers(dbUsers);
+          if (dbActivities.length > 0) setActivities(dbActivities);
+          if (dbVacations.length > 0) setVacations(dbVacations);
+          if (dbGoals.length > 0) setProductionGoals(dbGoals);
+          if (dbProcedures.length > 0) setProcedures(dbProcedures);
+          if (dbKnowledge.length > 0) setKnowledge(dbKnowledge);
+          if (dbLogs && dbLogs.length > 0) setAuditLogs(dbLogs);
+          if (dbHolidays.length > 0) setHolidays(dbHolidays);
+          if (dbCompetencia) setCompetencia(dbCompetencia);
+          if (dbSimDate) setCurrentSimulatedDate(dbSimDate);
+        }
+      } else {
+        setSupabaseStatus('error');
+      }
+
+      setTimeout(() => {
+        isSyncingFromSupabase.current = false;
+      }, 800);
+    } catch (e) {
+      console.warn('Error loading data from Supabase:', e);
+      setSupabaseStatus('error');
+      isSyncingFromSupabase.current = false;
+    } finally {
+      setSupabaseLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAllSupabaseData();
+  }, []);
+
   // -----------------------------------------
   // Core Operational States
   // -----------------------------------------
@@ -255,10 +362,18 @@ export default function App() {
   // -----------------------------------------
   useEffect(() => {
     localStorage.setItem('sgo_competencia', competencia);
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      supabaseService.saveSetting('competencia', competencia);
+    }
   }, [competencia]);
 
   useEffect(() => {
     localStorage.setItem('sgo_users', JSON.stringify(users));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      users.forEach(u => {
+        supabaseService.saveUser(u);
+      });
+    }
   }, [users]);
 
   useEffect(() => {
@@ -271,34 +386,70 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('sgo_activities', JSON.stringify(activities));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      activities.forEach(a => {
+        supabaseService.saveActivity(a);
+      });
+    }
   }, [activities]);
 
   useEffect(() => {
     localStorage.setItem('sgo_vacations', JSON.stringify(vacations));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      vacations.forEach(v => {
+        supabaseService.saveVacation(v);
+      });
+    }
   }, [vacations]);
 
   useEffect(() => {
     localStorage.setItem('sgo_goals', JSON.stringify(productionGoals));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      productionGoals.forEach(g => {
+        supabaseService.saveProductionGoal(g);
+      });
+    }
   }, [productionGoals]);
 
   useEffect(() => {
     localStorage.setItem('sgo_procedures', JSON.stringify(procedures));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      procedures.forEach(p => {
+        supabaseService.saveProcedure(p);
+      });
+    }
   }, [procedures]);
 
   useEffect(() => {
     localStorage.setItem('sgo_knowledge', JSON.stringify(knowledge));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      knowledge.forEach(k => {
+        supabaseService.saveKnowledge(k);
+      });
+    }
   }, [knowledge]);
 
   useEffect(() => {
     localStorage.setItem('sgo_audit_logs', JSON.stringify(auditLogs));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current && auditLogs.length > 0) {
+      supabaseService.saveAuditLog(auditLogs[auditLogs.length - 1]);
+    }
   }, [auditLogs]);
 
   useEffect(() => {
     localStorage.setItem('sgo_simulated_date', currentSimulatedDate);
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      supabaseService.saveSetting('simulated_date', currentSimulatedDate);
+    }
   }, [currentSimulatedDate]);
 
   useEffect(() => {
     localStorage.setItem('sgo_holidays', JSON.stringify(holidays));
+    if (isSupabaseConfigured && supabaseStatus === 'success' && !isSyncingFromSupabase.current) {
+      holidays.forEach(h => {
+        supabaseService.saveHoliday(h);
+      });
+    }
   }, [holidays]);
 
   // Helper to add audit logs
@@ -382,6 +533,9 @@ export default function App() {
     if (!act) return;
     logEvent(`Remoção de Atividade`, `Atividade: ${act.nome}`, 'Excluída permanentemente');
     setActivities(prev => prev.filter(a => a.id !== actId));
+    if (isSupabaseConfigured) {
+      supabaseService.deleteActivity(actId);
+    }
   };
 
   const handleCreateActivity = (newAct: Omit<Activity, 'id' | 'comentarios' | 'anexos'>) => {
@@ -543,6 +697,9 @@ export default function App() {
 
     // Remove or reset vacation
     setVacations(prev => prev.filter(v => v.id !== vacationId));
+    if (isSupabaseConfigured) {
+      supabaseService.deleteVacation(vacationId);
+    }
   };
 
   const handleCancelVacation = (vacationId: string) => {
@@ -568,6 +725,9 @@ export default function App() {
 
     // Remove vacation
     setVacations(prev => prev.filter(v => v.id !== vacationId));
+    if (isSupabaseConfigured) {
+      supabaseService.deleteVacation(vacationId);
+    }
   };
 
   // -----------------------------------------
@@ -745,6 +905,9 @@ export default function App() {
       return remaining;
     });
     logEvent(`Colaborador Excluído`, originalUser?.nome, 'Removido permanentemente');
+    if (isSupabaseConfigured) {
+      supabaseService.deleteUser(userId);
+    }
   };
 
   const handleResetPassword = (userId: string) => {
@@ -770,6 +933,9 @@ export default function App() {
     const originalHoliday = holidays.find(h => h.id === holidayId);
     setHolidays(prev => prev.filter(h => h.id !== holidayId));
     logEvent(`Feriado Excluído`, originalHoliday?.nome, 'Removido permanentemente');
+    if (isSupabaseConfigured) {
+      supabaseService.deleteHoliday(holidayId);
+    }
   };
 
   const handleAddGoal = (newGoal: Omit<ProductionGoal, 'id' | 'producaoAcumulada' | 'producaHoje' | 'diasRestantes' | 'historicoDiario'>) => {
@@ -874,6 +1040,9 @@ export default function App() {
     const originalGoal = productionGoals.find(g => g.id === goalId);
     setProductionGoals(prev => prev.filter(g => g.id !== goalId));
     logEvent(`Lote de Metas Excluído`, originalGoal?.nome || 'Nenhum', `Exclusão do lote da competência ${originalGoal?.competencia}`);
+    if (isSupabaseConfigured) {
+      supabaseService.deleteProductionGoal(goalId);
+    }
   };
 
   const handleAdjustProduction = (goalId: string, dateStr: string, collaboratorId: string, qty: number) => {
@@ -964,6 +1133,9 @@ export default function App() {
     if (!proc) return;
     setProcedures(prev => prev.filter(p => p.id !== procId));
     logEvent(`Procedimento Excluído`, proc.titulo, `Removido por ${activeUser?.nome}`);
+    if (isSupabaseConfigured) {
+      supabaseService.deleteProcedure(procId);
+    }
   };
 
   const handleEditProcedure = (procId: string, updatedFields: Partial<Procedure>) => {
@@ -1166,6 +1338,34 @@ export default function App() {
                 <span className="text-[9px] bg-indigo-50 text-indigo-700 dark:bg-zinc-805 dark:text-indigo-400 font-bold px-1.5 py-0.5 rounded-md">GESTÃO OPERACIONAL</span>
               </h1>
               <p className="text-[10px] text-zinc-400 mt-1 font-medium">Competência Ativa: <span className="font-mono font-bold text-purple-600 dark:text-purple-400">{competencia}</span></p>
+              
+              {/* Supabase connection status indicator */}
+              <div className="flex items-center gap-1.5 mt-1.5">
+                {supabaseStatus === 'offline' && (
+                  <span className="text-[9px] font-bold bg-amber-55 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/40 px-2 py-0.5 rounded-full flex items-center gap-1" title="Supabase não configurado. Seus dados estão sendo salvos localmente no navegador.">
+                    🔌 Modo Local (Offline)
+                  </span>
+                )}
+                {supabaseStatus === 'idle' && (
+                  <span className="text-[9px] font-bold bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                    🔄 Conectando Supabase...
+                  </span>
+                )}
+                {supabaseStatus === 'success' && (
+                  <span className="text-[9px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-900/30 px-2 py-0.5 rounded-full flex items-center gap-1" title="Conexão com Supabase efetuada e dados sincronizados em tempo real!">
+                    🟢 Nuvem Sincronizada
+                  </span>
+                )}
+                {supabaseStatus === 'error' && (
+                  <button 
+                    onClick={() => setIsSqlModalOpen(true)}
+                    className="text-[9px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-750 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 dark:text-rose-450 border border-rose-200/50 dark:border-rose-900/30 px-2 py-0.5 rounded-full flex items-center gap-1 cursor-pointer transition-all animate-bounce"
+                    title="Erro na sincronização de tabelas. Clique aqui para abrir o Assistente de Configuração do Banco de Dados."
+                  >
+                    🔴 Erro de Sincronização (Clique para Corrigir)
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1222,10 +1422,23 @@ export default function App() {
               </div>
             )}
 
+            {/* Manual Sync Button for Cloud Data */}
+            {isSupabaseConfigured && (
+              <button
+                onClick={loadAllSupabaseData}
+                disabled={supabaseLoading}
+                className="flex items-center gap-1.5 px-3 py-2 bg-zinc-150/70 hover:bg-zinc-200 dark:bg-zinc-850 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-350 transition disabled:opacity-50 shrink-0 cursor-pointer"
+                title="Atualizar dados do banco na nuvem"
+              >
+                <RefreshCw size={12} className={supabaseLoading ? 'animate-spin text-indigo-500' : 'text-zinc-500'} />
+                {supabaseLoading ? 'Sincronizando...' : 'Sincronizar'}
+              </button>
+            )}
+
             {/* Layout Mode switch button */}
             <button
               onClick={toggleTheme}
-              className="p-2 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-500 dark:text-zinc-455 transition shrink-0"
+              className="p-2 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-500 dark:text-zinc-455 transition shrink-0 cursor-pointer"
               title="Alternar brilho do layout"
             >
               {themeMode === 'claro' ? <Moon size={16} /> : <Sun size={16} />}
@@ -1917,6 +2130,290 @@ export default function App() {
         isOpen={showAiAssistant}
         onClose={() => setShowAiAssistant(false)}
       />
+
+      {/* Supabase SQL Setup Assistant Modal */}
+      {isSqlModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-sm select-none">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Modal Header */}
+            <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-rose-500 rounded-xl text-white">
+                  <Database size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black tracking-tight text-zinc-900 dark:text-white">Assistente de Configuração do Banco de Dados</h3>
+                  <p className="text-[10px] text-zinc-400 font-medium">Sincronização Nuvem Supabase – SGO AI</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsSqlModalOpen(false)}
+                className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-350 cursor-pointer transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 overflow-y-auto space-y-4">
+              <div className="bg-rose-500/10 dark:bg-rose-500/5 border border-rose-500/25 p-3.5 rounded-xl text-xs text-rose-750 dark:text-rose-400">
+                <p className="font-bold mb-1">Por que este erro ocorre?</p>
+                <p className="leading-relaxed text-[11px]">
+                  As credenciais do Supabase foram adicionadas, mas as tabelas necessárias para armazenar as atividades, colaboradores, metas, férias, procedimentos e logs de auditoria ainda não existem no banco de dados da sua conta do Supabase.
+                </p>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-bold text-zinc-800 dark:text-zinc-200 mb-2">Siga o passo a passo para corrigir em 1 minuto:</h4>
+                <ol className="list-decimal list-inside text-[11px] text-zinc-500 dark:text-zinc-400 space-y-1.5 leading-relaxed">
+                  <li>Acesse o painel do seu <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-bold inline-flex items-center gap-0.5">Supabase Dashboard <ArrowRight size={10} className="inline" /></a>.</li>
+                  <li>Selecione o seu projeto e clique na aba <strong>SQL Editor</strong> (no menu lateral esquerdo).</li>
+                  <li>Clique no botão <strong>New Query</strong> (Nova Consulta) no topo.</li>
+                  <li>Clique no botão abaixo para copiar o script SQL completo, cole-o no editor e clique em <strong>Run</strong> (Executar/Executar Script).</li>
+                </ol>
+              </div>
+
+              {/* Code Panel */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center bg-zinc-100 dark:bg-zinc-850 px-3.5 py-1.5 rounded-t-xl border-t border-x border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] font-mono font-bold text-zinc-500 dark:text-zinc-400">sgo_schema.sql</span>
+                  <button
+                    onClick={() => {
+                      const sqlText = `-- 1. Tabela de Configurações
+CREATE TABLE IF NOT EXISTS sgo_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+
+-- 2. Tabela de Colaboradores (Usuários)
+CREATE TABLE IF NOT EXISTS sgo_users (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  email TEXT UNIQUE,
+  role TEXT,
+  avatar TEXT,
+  meta_diaria_padrao INTEGER,
+  status TEXT,
+  senha TEXT,
+  funcao TEXT
+);
+
+-- 3. Tabela de Atividades
+CREATE TABLE IF NOT EXISTS sgo_activities (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  competencia TEXT,
+  responsavel_original_id TEXT,
+  responsavel_atual_id TEXT,
+  responsaveis_auxiliares_ids JSONB DEFAULT '[]'::jsonb,
+  prioridade TEXT,
+  status TEXT,
+  data_limite TEXT,
+  comentarios JSONB DEFAULT '[]'::jsonb,
+  anexos JSONB DEFAULT '[]'::jsonb,
+  recorrente BOOLEAN DEFAULT false,
+  periodicidade TEXT,
+  meses_atividade_com_mesmo_responsavel INTEGER DEFAULT 0
+);
+
+-- 4. Tabela de Férias
+CREATE TABLE IF NOT EXISTS sgo_vacations (
+  id TEXT PRIMARY KEY,
+  colaborador_id TEXT NOT NULL,
+  data_inicio TEXT NOT NULL,
+  data_fim TEXT NOT NULL,
+  redistribuida BOOLEAN DEFAULT false,
+  redistribuicoes JSONB DEFAULT '{}'::jsonb
+);
+
+-- 5. Tabela de Metas de Produção (Lançamentos)
+CREATE TABLE IF NOT EXISTS sgo_production_goals (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  competencia TEXT NOT NULL,
+  quantidade_total INTEGER NOT NULL,
+  dias_uteis INTEGER NOT NULL,
+  participantes_ids JSONB DEFAULT '[]'::jsonb,
+  producao_acumulada JSONB DEFAULT '{}'::jsonb,
+  produca_hoje JSONB DEFAULT '{}'::jsonb,
+  dias_restantes INTEGER,
+  historico_diario JSONB DEFAULT '{}'::jsonb,
+  planilha_anexo TEXT,
+  faturas JSONB DEFAULT '[]'::jsonb
+);
+
+-- 6. Tabela de Procedimentos
+CREATE TABLE IF NOT EXISTS sgo_procedures (
+  id TEXT PRIMARY KEY,
+  titulo TEXT NOT NULL,
+  descricao TEXT,
+  passos JSONB DEFAULT '[]'::jsonb,
+  autor_id TEXT,
+  status TEXT,
+  data_sugerida TEXT,
+  pdf_nome TEXT,
+  image_nome TEXT
+);
+
+-- 7. Tabela de Matriz de Competência (Knowledge Ratings)
+CREATE TABLE IF NOT EXISTS sgo_knowledge (
+  colaborador_id TEXT NOT NULL,
+  atividade_nome TEXT NOT NULL,
+  nivel INTEGER NOT NULL,
+  PRIMARY KEY (colaborador_id, atividade_nome)
+);
+
+-- 8. Tabela de Logs de Auditoria
+CREATE TABLE IF NOT EXISTS sgo_audit_logs (
+  id TEXT PRIMARY KEY,
+  usuario_nome TEXT NOT NULL,
+  data_hora TEXT NOT NULL,
+  acao TEXT NOT NULL,
+  info_anterior TEXT,
+  info_nova TEXT
+);
+
+-- 9. Tabela de Feriados
+CREATE TABLE IF NOT EXISTS sgo_holidays (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  tipo TEXT NOT NULL,
+  data TEXT NOT NULL
+);`;
+                      navigator.clipboard.writeText(sqlText);
+                      setSqlCopied(true);
+                      setTimeout(() => setSqlCopied(false), 2000);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-zinc-50 dark:bg-zinc-800 dark:hover:bg-zinc-750 border dark:border-zinc-700 rounded-lg text-[10px] font-bold text-indigo-600 dark:text-indigo-400 transition cursor-pointer shadow-sm"
+                  >
+                    {sqlCopied ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                    {sqlCopied ? 'Copiado!' : 'Copiar SQL'}
+                  </button>
+                </div>
+                <div className="bg-zinc-950 text-zinc-300 p-4 rounded-b-xl border border-zinc-200 dark:border-zinc-800 text-[10px] font-mono max-h-[200px] overflow-y-auto leading-relaxed select-all">
+                  <pre>{`-- 1. Tabela de Configurações
+CREATE TABLE IF NOT EXISTS sgo_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+
+-- 2. Tabela de Colaboradores (Usuários)
+CREATE TABLE IF NOT EXISTS sgo_users (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  email TEXT UNIQUE,
+  role TEXT,
+  avatar TEXT,
+  meta_diaria_padrao INTEGER,
+  status TEXT,
+  senha TEXT,
+  funcao TEXT
+);
+
+-- 3. Tabela de Atividades
+CREATE TABLE IF NOT EXISTS sgo_activities (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  competencia TEXT,
+  responsavel_original_id TEXT,
+  responsavel_atual_id TEXT,
+  responsaveis_auxiliares_ids JSONB DEFAULT '[]'::jsonb,
+  prioridade TEXT,
+  status TEXT,
+  data_limite TEXT,
+  comentarios JSONB DEFAULT '[]'::jsonb,
+  anexos JSONB DEFAULT '[]'::jsonb,
+  recorrente BOOLEAN DEFAULT false,
+  periodicidade TEXT,
+  meses_atividade_com_mesmo_responsavel INTEGER DEFAULT 0
+);
+
+-- 4. Tabela de Férias
+CREATE TABLE IF NOT EXISTS sgo_vacations (
+  id TEXT PRIMARY KEY,
+  colaborador_id TEXT NOT NULL,
+  data_inicio TEXT NOT NULL,
+  data_fim TEXT NOT NULL,
+  redistribuida BOOLEAN DEFAULT false,
+  redistribuicoes JSONB DEFAULT '{}'::jsonb
+);
+
+-- 5. Tabela de Metas de Produção (Lançamentos)
+CREATE TABLE IF NOT EXISTS sgo_production_goals (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  competencia TEXT NOT NULL,
+  quantidade_total INTEGER NOT NULL,
+  dias_uteis INTEGER NOT NULL,
+  participantes_ids JSONB DEFAULT '[]'::jsonb,
+  producao_acumulada JSONB DEFAULT '{}'::jsonb,
+  produca_hoje JSONB DEFAULT '{}'::jsonb,
+  dias_restantes INTEGER,
+  historico_diario JSONB DEFAULT '{}'::jsonb,
+  planilha_anexo TEXT,
+  faturas JSONB DEFAULT '[]'::jsonb
+);
+
+-- 6. Tabela de Procedimentos
+CREATE TABLE IF NOT EXISTS sgo_procedures (
+  id TEXT PRIMARY KEY,
+  titulo TEXT NOT NULL,
+  descricao TEXT,
+  passos JSONB DEFAULT '[]'::jsonb,
+  autor_id TEXT,
+  status TEXT,
+  data_sugerida TEXT,
+  pdf_nome TEXT,
+  image_nome TEXT
+);
+
+-- 7. Tabela de Matriz de Competência (Knowledge Ratings)
+CREATE TABLE IF NOT EXISTS sgo_knowledge (
+  colaborador_id TEXT NOT NULL,
+  atividade_nome TEXT NOT NULL,
+  nivel INTEGER NOT NULL,
+  PRIMARY KEY (colaborador_id, atividade_nome)
+);
+
+-- 8. Tabela de Logs de Auditoria
+CREATE TABLE IF NOT EXISTS sgo_audit_logs (
+  id TEXT PRIMARY KEY,
+  usuario_nome TEXT NOT NULL,
+  data_hora TEXT NOT NULL,
+  acao TEXT NOT NULL,
+  info_anterior TEXT,
+  info_nova TEXT
+);
+
+-- 9. Tabela de Feriados
+CREATE TABLE IF NOT EXISTS sgo_holidays (
+  id TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  tipo TEXT NOT NULL,
+  data TEXT NOT NULL
+);`}</pre>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-zinc-500 text-center">
+                Após executar o script no SQL Editor, clique no botão <strong>Sincronizar</strong> no topo do painel para conectar imediatamente!
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end">
+              <button
+                onClick={() => setIsSqlModalOpen(false)}
+                className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-850 dark:hover:bg-zinc-800 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-350 cursor-pointer transition"
+              >
+                Entendido, Fechar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
