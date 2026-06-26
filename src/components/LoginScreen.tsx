@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bot, Key, Mail, ShieldAlert, Eye, EyeOff, Sparkles, Sun, Moon, Database } from 'lucide-react';
+import { Bot, Key, Mail, ShieldAlert, Eye, EyeOff, Sparkles, Sun, Moon } from 'lucide-react';
 import { User as UserType } from '../types';
 
 interface LoginScreenProps {
@@ -208,46 +208,8 @@ export function LoginScreen({ users, onLogin, themeMode, toggleTheme }: LoginScr
                     <span className="text-[9px] text-purple-600 dark:text-purple-400 font-black tracking-wider uppercase">COLAB</span>
                   </button>
                 </div>
-
-                {/* SQL setup instructions for smooth database initialization */}
-                <div className="pt-2.5 border-t border-dashed border-zinc-200 dark:border-zinc-800 space-y-1 bg-zinc-100/30 dark:bg-zinc-950/40 p-2.5 rounded-lg select-text text-left">
-                  <div className="text-[9px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-wider flex items-center gap-1">
-                    <Database size={10} /> Sincronização Geral (Supabase)
-                  </div>
-                  <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-normal">
-                    Para que todos os operadores vejam as mesmas tabelas, demandas e alterações em navegadores ou computadores diferentes, execute o código SQL abaixo no <strong>SQL Editor</strong> do seu painel do Supabase:
-                  </p>
-                  <pre className="p-1 px-1.5 bg-zinc-100 dark:bg-zinc-950 text-[8px] text-zinc-600 dark:text-zinc-400 font-mono overflow-x-auto rounded select-all whitespace-pre leading-snug">
-{`CREATE TABLE IF NOT EXISTS sgo_store (
-  key text PRIMARY KEY,
-  value jsonb NOT NULL,
-  updated_at timestamp WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);`}
-                  </pre>
-                  <p className="text-[9px] text-zinc-450 dark:text-zinc-500 leading-normal">
-                    Em seguida, declare as Environment Variables em seu projeto na Vercel:<br />
-                    • <code className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">VITE_SUPABASE_URL</code><br />
-                    • <code className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">VITE_SUPABASE_ANON_KEY</code>
-                  </p>
-                </div>
               </div>
             )}
-          </div>
-
-          {/* Failsafe Local Reset Link */}
-          <div className="text-center pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                if (window.confirm("Deseja restaurar o banco de dados local para as definições de fábrica? Isso removerá logins corrompidos e carregará todas as contas novas atualizadas.")) {
-                  localStorage.clear();
-                  window.location.reload();
-                }
-              }}
-              className="text-[10px] text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition cursor-pointer font-medium"
-            >
-              Não encontra seu usuário? Resetar banco de dados local (Fábrica)
-            </button>
           </div>
 
 

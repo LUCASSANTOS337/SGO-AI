@@ -9,7 +9,6 @@ import {
   INITIAL_USERS, INITIAL_ACTIVITIES, INITIAL_VACATIONS, 
   INITIAL_GOALS, INITIAL_PROCEDURES, INITIAL_KNOWLEDGE, INITIAL_AUDIT_LOGS 
 } from './mockData';
-import { isSupabaseConfigured, supabase, loadAllStateFromSupabase, saveKeyToSupabase } from './lib/supabase';
 import { 
   User as UserType, Activity, Vacation, ProductionGoal, 
   Procedure, KnowledgeRating, AuditLog, Priority, ActivityStatus, Comment, Holiday
@@ -39,21 +38,6 @@ import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { COMPETENCIAS_LIST, getTodayFormatted, adjustLimitDateForCompetence } from './utils/competencias';
 
 export default function App() {
-  const [isLoadingDb, setIsLoadingDb] = useState<boolean>(true);
-  const isSyncingFromDb = React.useRef<boolean>(false);
-  const clientIdRef = React.useRef<string>(Math.random().toString(36).substring(2, 11));
-  const liveChannelRef = React.useRef<any>(null);
-
-  const broadcastChange = (key: string, value: any) => {
-    if (isSupabaseConfigured && liveChannelRef.current) {
-      liveChannelRef.current.send({
-        type: 'broadcast',
-        event: 'state_changed',
-        payload: { key, value, senderId: clientIdRef.current }
-      }).catch((err: any) => console.warn("Erro no broadcast:", err));
-    }
-  };
-
   // -----------------------------------------
   // Core Operational States
   // -----------------------------------------
@@ -65,62 +49,37 @@ export default function App() {
       return 'Junho/2026';
     }
   });
-  const getHealedUsers = (): UserType[] => {
+  const [users, setUsers] = useState<UserType[]>(() => {
     try {
       const saved = localStorage.getItem('sgo_users');
-      let parsed: any[] = [];
-      if (saved) {
-        try {
-          const raw = JSON.parse(saved);
-          if (Array.isArray(raw)) {
-            parsed = raw;
-          } else {
-            parsed = INITIAL_USERS;
-          }
-        } catch {
-          parsed = INITIAL_USERS;
-        }
-      } else {
-        parsed = INITIAL_USERS;
-      }
+      const parsed = saved ? JSON.parse(saved) : INITIAL_USERS;
       
-      // Start with a pristine list from INITIAL_USERS so core users can never be lost or blocked
-      const merged = INITIAL_USERS.map(u => ({ ...u, senha: u.senha || '123' }));
-      
-      // Append any custom added users, but do not replace or corrupt core INITIAL_USERS
-      parsed.forEach((storedUser: any) => {
-        if (!storedUser) return;
-        const storedEmail = storedUser.email ? storedUser.email.trim().toLowerCase() : '';
-        const storedId = storedUser.id ? storedUser.id.trim().toLowerCase() : '';
-        
-        if (!storedEmail || !storedId) return;
-
-        const isCoreUser = INITIAL_USERS.some(cu => 
-          cu.id.trim().toLowerCase() === storedId || 
-          cu.email.trim().toLowerCase() === storedEmail
-        );
-
-        if (!isCoreUser) {
-          merged.push({
-            ...storedUser,
-            id: storedId,
-            email: storedEmail,
-            senha: storedUser.senha || '123'
-          });
-        } else {
-          // If the core user had updated their password, preserve it
-          const coreIdx = merged.findIndex(cu => 
-            cu.id.trim().toLowerCase() === storedId || 
-            cu.email.trim().toLowerCase() === storedEmail
-          );
-          if (coreIdx !== -1 && storedUser.senha && storedUser.senha !== '123') {
-            merged[coreIdx].senha = storedUser.senha;
-          }
+      // Merge missing initial users (like Leandro) into the existing structure by email
+      const merged = [...parsed];
+      INITIAL_USERS.forEach(initialUser => {
+        const exists = parsed.some((u: any) => u.email.trim().toLowerCase() === initialUser.email.trim().toLowerCase());
+        if (!exists) {
+          merged.push(initialUser);
         }
       });
 
-      // Enforce specific security constraints for Leandro
-      const finalCleaned = merged.map((u: any) => {
+      // Deduplicate unique by BOTH email and id
+      const uniqueUsers: any[] = [];
+      const seenEmails = new Set<string>();
+      const seenIds = new Set<string>();
+      
+      merged.forEach((u: any) => {
+        const emailKey = u.email ? u.email.trim().toLowerCase() : '';
+        const idKey = u.id ? u.id.trim().toLowerCase() : '';
+        if (emailKey && idKey && !seenEmails.has(emailKey) && !seenIds.has(idKey)) {
+          seenEmails.add(emailKey);
+          seenIds.add(idKey);
+          uniqueUsers.push(u);
+        }
+      });
+
+      // Guarantee everyone has a password, and explicitly enforce Leandro's non-Admin role
+      const finalCleaned = uniqueUsers.map((u: any) => {
         let updated = { ...u, senha: u.senha || '123' };
         if (updated.email.trim().toLowerCase() === 'leandro.menezes@asfeb.org.br') {
           updated.role = 'Colaborador';
@@ -129,7 +88,7 @@ export default function App() {
         return updated;
       });
 
-      // Persist healed clean users
+      // Heal localStorage immediately
       localStorage.setItem('sgo_users', JSON.stringify(finalCleaned));
       return finalCleaned;
     } catch {
@@ -137,10 +96,6 @@ export default function App() {
       try { localStorage.setItem('sgo_users', JSON.stringify(fallback)); } catch {}
       return fallback;
     }
-  };
-
-  const [users, setUsers] = useState<UserType[]>(() => {
-    return getHealedUsers();
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -155,7 +110,32 @@ export default function App() {
   const [activeUser, setActiveUser] = useState<UserType | null>(() => {
     try {
       const savedActive = localStorage.getItem('sgo_active_user');
-      const currentUsers = getHealedUsers();
+      const savedUsers = localStorage.getItem('sgo_users');
+      const rawUsers = savedUsers 
+        ? JSON.parse(savedUsers).map((u: any) => ({ ...u, senha: u.senha || '123' })) 
+        : INITIAL_USERS.map(u => ({ ...u, senha: u.senha || '123' }));
+      
+      const uniqueUsers: any[] = [];
+      const seenEmails = new Set<string>();
+      const seenIds = new Set<string>();
+      
+      rawUsers.forEach((u: any) => {
+        const emailKey = u.email ? u.email.trim().toLowerCase() : '';
+        const idKey = u.id ? u.id.trim().toLowerCase() : '';
+        if (emailKey && idKey && !seenEmails.has(emailKey) && !seenIds.has(idKey)) {
+          seenEmails.add(emailKey);
+          seenIds.add(idKey);
+          uniqueUsers.push(u);
+        }
+      });
+
+      const currentUsers = uniqueUsers.map((u: any) => {
+        if (u.email.trim().toLowerCase() === 'leandro.menezes@asfeb.org.br') {
+          u.role = 'Colaborador';
+          u.funcao = 'ANALISTA PLENO';
+        }
+        return u;
+      });
       
       const savedAuth = localStorage.getItem('sgo_is_authenticated');
       const isAuth = savedAuth === 'true';
@@ -271,22 +251,14 @@ export default function App() {
   };
 
   // -----------------------------------------
-  // Automatic Persistence Effects (Local + Supabase Sync)
+  // Automatic Persistence Effects
   // -----------------------------------------
   useEffect(() => {
     localStorage.setItem('sgo_competencia', competencia);
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_competencia', competencia);
-      broadcastChange('sgo_competencia', competencia);
-    }
   }, [competencia]);
 
   useEffect(() => {
     localStorage.setItem('sgo_users', JSON.stringify(users));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_users', users);
-      broadcastChange('sgo_users', users);
-    }
   }, [users]);
 
   useEffect(() => {
@@ -299,204 +271,35 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('sgo_activities', JSON.stringify(activities));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_activities', activities);
-      broadcastChange('sgo_activities', activities);
-    }
   }, [activities]);
 
   useEffect(() => {
     localStorage.setItem('sgo_vacations', JSON.stringify(vacations));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_vacations', vacations);
-      broadcastChange('sgo_vacations', vacations);
-    }
   }, [vacations]);
 
   useEffect(() => {
     localStorage.setItem('sgo_goals', JSON.stringify(productionGoals));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_goals', productionGoals);
-      broadcastChange('sgo_goals', productionGoals);
-    }
   }, [productionGoals]);
 
   useEffect(() => {
     localStorage.setItem('sgo_procedures', JSON.stringify(procedures));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_procedures', procedures);
-      broadcastChange('sgo_procedures', procedures);
-    }
   }, [procedures]);
 
   useEffect(() => {
     localStorage.setItem('sgo_knowledge', JSON.stringify(knowledge));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_knowledge', knowledge);
-      broadcastChange('sgo_knowledge', knowledge);
-    }
   }, [knowledge]);
 
   useEffect(() => {
     localStorage.setItem('sgo_audit_logs', JSON.stringify(auditLogs));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_audit_logs', auditLogs);
-      broadcastChange('sgo_audit_logs', auditLogs);
-    }
   }, [auditLogs]);
 
   useEffect(() => {
     localStorage.setItem('sgo_simulated_date', currentSimulatedDate);
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_simulated_date', currentSimulatedDate);
-      broadcastChange('sgo_simulated_date', currentSimulatedDate);
-    }
   }, [currentSimulatedDate]);
 
   useEffect(() => {
     localStorage.setItem('sgo_holidays', JSON.stringify(holidays));
-    if (!isLoadingDb && isSupabaseConfigured && !isSyncingFromDb.current) {
-      saveKeyToSupabase('sgo_holidays', holidays);
-      broadcastChange('sgo_holidays', holidays);
-    }
   }, [holidays]);
-
-  // -----------------------------------------
-  // Supabase Database Live Synchronizer (Polling & Initial Seed)
-  // -----------------------------------------
-  useEffect(() => {
-    if (!isSupabaseConfigured) {
-      setIsLoadingDb(false);
-      return;
-    }
-
-    let active = true;
-
-    async function loadStateAndSync() {
-      try {
-        console.log("Sincronizando banco de dados compartilhado com o Supabase...");
-        const dbState = await loadAllStateFromSupabase();
-        
-        if (!active) return;
-
-        // If shared database has records, load them cleanly
-        if (dbState && (dbState.sgo_users || dbState.sgo_activities)) {
-          isSyncingFromDb.current = true;
-          
-          if (dbState.sgo_users) setUsers(dbState.sgo_users);
-          if (dbState.sgo_activities) setActivities(dbState.sgo_activities);
-          if (dbState.sgo_vacations) setVacations(dbState.sgo_vacations);
-          if (dbState.sgo_goals) setProductionGoals(dbState.sgo_goals);
-          if (dbState.sgo_procedures) setProcedures(dbState.sgo_procedures);
-          if (dbState.sgo_knowledge) setKnowledge(dbState.sgo_knowledge);
-          if (dbState.sgo_audit_logs) setAuditLogs(dbState.sgo_audit_logs);
-          if (dbState.sgo_holidays) setHolidays(dbState.sgo_holidays);
-          if (dbState.sgo_competencia) setCompetencia(dbState.sgo_competencia);
-          if (dbState.sgo_simulated_date) setCurrentSimulatedDate(dbState.sgo_simulated_date);
-
-          setTimeout(() => {
-            isSyncingFromDb.current = false;
-          }, 300);
-        } else {
-          // Empty database: Seed it instantly with initial state to start clean
-          console.log("Injetando dados iniciais operacionais no Supabase...");
-          isSyncingFromDb.current = true;
-          await Promise.all([
-            saveKeyToSupabase('sgo_users', getHealedUsers()),
-            saveKeyToSupabase('sgo_activities', INITIAL_ACTIVITIES),
-            saveKeyToSupabase('sgo_vacations', INITIAL_VACATIONS),
-            saveKeyToSupabase('sgo_goals', INITIAL_GOALS),
-            saveKeyToSupabase('sgo_procedures', INITIAL_PROCEDURES),
-            saveKeyToSupabase('sgo_knowledge', INITIAL_KNOWLEDGE),
-            saveKeyToSupabase('sgo_audit_logs', INITIAL_AUDIT_LOGS),
-            saveKeyToSupabase('sgo_holidays', holidays),
-            saveKeyToSupabase('sgo_competencia', competencia),
-            saveKeyToSupabase('sgo_simulated_date', currentSimulatedDate)
-          ]);
-          isSyncingFromDb.current = false;
-        }
-      } catch (err) {
-        console.warn("Falha ao sincronizar estados com Supabase:", err);
-      } finally {
-        if (active) {
-          setIsLoadingDb(false);
-        }
-      }
-    }
-
-    loadStateAndSync();
-
-    // Background short-polling to keep other computers / browsers fully aligned as fallback
-    const pollInterval = setInterval(() => {
-      loadStateAndSync();
-    }, 8000);
-
-    // Realtime Supabase Broadcast Channel for 100% instant sync
-    let channel: any = null;
-    if (isSupabaseConfigured && supabase) {
-      channel = supabase.channel('sgo_live_room');
-      liveChannelRef.current = channel;
-
-      channel
-        .on('broadcast', { event: 'state_changed' }, ({ payload }: any) => {
-          if (!payload || payload.senderId === clientIdRef.current) return;
-          
-          isSyncingFromDb.current = true;
-          const { key, value } = payload;
-          console.log(`[REALTIME-WS] Instant sync update received for key "${key}"!`);
-          
-          switch(key) {
-            case 'sgo_competencia':
-              setCompetencia(value);
-              break;
-            case 'sgo_users':
-              setUsers(value);
-              break;
-            case 'sgo_activities':
-              setActivities(value);
-              break;
-            case 'sgo_vacations':
-              setVacations(value);
-              break;
-            case 'sgo_goals':
-              setProductionGoals(value);
-              break;
-            case 'sgo_procedures':
-              setProcedures(value);
-              break;
-            case 'sgo_knowledge':
-              setKnowledge(value);
-              break;
-            case 'sgo_audit_logs':
-              setAuditLogs(value);
-              break;
-            case 'sgo_simulated_date':
-              setCurrentSimulatedDate(value);
-              break;
-            case 'sgo_holidays':
-              setHolidays(value);
-              break;
-          }
-
-          setTimeout(() => {
-            isSyncingFromDb.current = false;
-          }, 350);
-        })
-        .subscribe((status: string) => {
-          if (status === 'SUBSCRIBED') {
-            console.log('[REALTIME-WS] Connected and active for instant updates!');
-          }
-        });
-    }
-
-    return () => {
-      active = false;
-      clearInterval(pollInterval);
-      if (channel && supabase) {
-        supabase.removeChannel(channel).catch((err: any) => console.warn(err));
-      }
-    };
-  }, []);
 
   // Helper to add audit logs
   const logEvent = (actionName: string, prev?: string, next?: string) => {
@@ -1369,23 +1172,6 @@ export default function App() {
           {/* Interactive Profile switcher and controls */}
           <div className="flex flex-wrap items-center justify-end gap-3">
             
-            {/* Supabase Status Indicator */}
-            {isSupabaseConfigured ? (
-              <div 
-                className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/20 px-2.5 py-1.5 rounded-xl border border-emerald-200/40 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 font-bold text-[10px] uppercase select-none shrink-0"
-                title="Conectado e sincronizado com o banco de dados Supabase na Vercel"
-              >
-                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0 animate-pulse" /> Supabase Ativo
-              </div>
-            ) : (
-              <div 
-                className="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1.5 rounded-xl border border-amber-200/40 dark:border-amber-900/40 text-amber-600 dark:text-amber-400 font-bold text-[10px] uppercase select-none shrink-0"
-                title="Armazenando dados no navegador. Configure VITE_SUPABASE_URL nas variáveis de ambiente."
-              >
-                <div className="w-1.5 h-1.5 bg-amber-550 rounded-full shrink-0 animate-bounce" /> Local Offline
-              </div>
-            )}
-
             {/* Competencia Dynamic Switcher */}
             <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-850 p-1 rounded-xl border dark:border-zinc-800">
               <span className="text-[10px] uppercase font-bold text-zinc-400 px-1.5">Ciclo:</span>
